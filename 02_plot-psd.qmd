@@ -1,0 +1,148 @@
+---
+title: "02_plot-granulo"
+format: html
+editor: visual
+---
+
+```{r}
+library("tidyverse")
+library("gghighlight")
+```
+
+```{r}
+soils <- read_csv("data/soils_rosin.csv", show_col_types = FALSE)
+grainsize <- read_csv("data/r_grainsize.csv", show_col_types = FALSE)
+fuseau <- read_csv("data/fuseaux.csv", show_col_types = FALSE)
+soils <- soils |> 
+  mutate(Soil_ID = sprintf("%002d", Soil_ID))
+```
+
+```{r}
+rosin <- function(d, k1, k2) {
+  return(1 - exp(-k1 * d**k2))
+}
+```
+
+```{r}
+d <- 10**seq(-3, 3, 0.1)
+fitted_psd <- list()
+for (i in 1:nrow(soils)) {
+  fitted_psd[[i]] <- data.frame(
+    Soil_ID = soils[i, 'Soil_ID'] |> pull(),
+    Mesh = d,
+    Perc_passing = rosin(d, soils[i, 'g1'] |> pull(), soils[i, 'g2'] |> pull()) * 100
+  )
+}
+fitted_psd <- bind_rows(fitted_psd) |> 
+  left_join(soils, by = "Soil_ID") |> 
+  mutate(Type = case_when(
+    Type == "MG20" ~ "",
+    Type == "MG112" ~ "",
+    TRUE ~ Type
+  )) |> 
+  mutate(Soil_ID = paste("Sol ID: ", Soil_ID, " - ", Metatype, Type))
+
+```
+
+```{r}
+gg_grainsize <- grainsize |>
+  left_join(soils |> select(Soil_ID, g1, g2, Gs, Site, Type), by = 'Soil_ID') |>
+  mutate(Type = case_when(
+    Type == "MG20" ~ "",
+    Type == "MG112" ~ "",
+    TRUE ~ Type
+  )) |> 
+  mutate(Soil_ID = paste("Sol ID: ", Soil_ID, " - ", Metatype, Type)) |> 
+  #select(Soil_ID, Mesh, Perc_passing, Metatype) |> 
+  drop_na()
+```
+
+```{r}
+gg_fuseau <- fuseau |>
+  pivot_wider(names_from = Limit, values_from = Perc_passing)
+```
+
+```{r}
+ggplot(gg_grainsize) +
+  facet_wrap(~Soil_ID, ncol = 4) +
+  geom_ribbon(
+    data = gg_fuseau,
+    mapping = aes(x=Mesh, ymin = Min, ymax = Max, fill = Metatype),
+    alpha = 0.5,
+  ) +
+  geom_line(data = fitted_psd, mapping = aes(x=Mesh, y=Perc_passing, group=Soil_ID)) +
+  geom_point(mapping = aes(x=Mesh, y=Perc_passing, group=Soil_ID), size=0.3) +
+  labs(
+    title = "Particle-size distributions",
+    x = "Mesh diameter (mm)",
+    y = "Percentage passing (%)"
+  ) +
+  scale_x_continuous(trans='log10') +
+  scale_fill_manual(values=c('#888', '#444')) + # #018748
+  gghighlight() +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size=8)
+  )
+ggsave('images/psd_rosin.png', height = 12, width = 10)
+```
+
+```{r}
+
+arrows <- tibble(
+    x1 = c(0.5, 12),
+    x2 = c(1.2, 3),
+    y1 = c(72, 22), 
+    y2 = c(55, 40)
+)
+
+
+ggplot() +
+  geom_ribbon(
+    data = fuseau |> pivot_wider(names_from = Limit, values_from = Perc_passing),
+    mapping = aes(x=Mesh, ymin = Min, ymax = Max, fill = Metatype),
+    alpha = 1,
+  ) +
+  annotate("text", x = 0.3, y = 72, label = "MG112") +
+  annotate("text", x = 18, y = 22, label = "MG20") +
+  geom_curve(
+    data = arrows, aes(x = x1, y = y1, xend = x2, yend = y2),
+    arrow = arrow(length = unit(0.08, "inch")), size = 0.5,
+    color = "gray20", curvature = -0.3
+  ) +
+  labs(
+    title = "Particle-size channels",
+    x = "Mesh diameter (mm)",
+    y = "Percentage passing (%)"
+  ) +
+  scale_x_continuous(trans='log10') +
+  scale_fill_manual(values=c('#888', '#444')) + 
+  theme_minimal() +
+  theme(legend.position="none")
+ggsave('images/psd-channel.png', height = 4, width = 5)
+```
+
+```{r}
+soils_stats <- soils |> 
+  group_by(Metatype) |> 
+  summarize(
+    median_Gs = median(Gs, na.rm = TRUE),
+    mad_Gs = mad(Gs, na.rm = TRUE, constant = 1)
+  )
+soils_stats
+```
+
+```{r}
+
+
+ggplot(data=soils, mapping=aes(x=Metatype, y=Gs)) +
+  geom_violin() +
+  geom_point(shape=1) +
+  geom_label(soils_stats, mapping=aes(y=median_Gs, label=paste0('median = ', round(median_Gs, 3))), hjust=1.1, fill='black', colour='white') +
+  geom_label(soils_stats, mapping=aes(y=median_Gs+mad_Gs, label=paste0('MAD+ = ', round(median_Gs + mad_Gs, 3))), hjust=1.1) +
+  geom_label(soils_stats, mapping=aes(y=median_Gs-mad_Gs, label=paste0('MAD- = ', round(median_Gs - mad_Gs, 3))), hjust=1.1) +
+  theme_minimal() +
+  labs(x='Soil type', y='Specific gravity, Gs (g/cm³)')
+ggsave('images/gs-violin.png', height = 5, width = 6)
+
+```

@@ -1,0 +1,36 @@
+Soil_ID,Name,Site,Type,Date,Gs
+1,Bassin Versant,Université de Sherbrooke,CG14,20/06/2019,2.738
+2,Campagne Magog,"345,chemin Fitch Bay,Magog,QC J1X 0Z5",CG14,16/05/2019,2.772
+3,Rue St. Gabriel,"Rue St. Gabriel, Mascouche",CG14,19/09/2019,2.711
+4,Bassin Versant,Université de Sherbrooke,MG20,17/06/2019,2.865
+5,Magog,Magog,MG20,26/07/2019,2.723
+6,Rue Jeannine,Drumondville,MG20,17/06/2019,2.817
+7,Rue Louise,Sherbrooke,MG20,10/07/2019,2.707
+8,Rue Triest,Sherbrooke,MG20,24/06/2019,2.826
+9,Voie 3_UdeS,Université de Sherbrooke,MG20,20/06/2019,2.827
+10,Campagne Magog,"345,chemin Fitch Bay,Magog,QC J1X 0Z5",MG112,16/05/2019,2.758
+11,Rue Toutant,Drumondville,MG112,31/05/2019,2.691
+12,Dieri,Burkina Faso,Latérite,15/12/2020,2.828
+13,Niangoloko,Burkina Faso,Latérite,21/12/2020,2.564
+14,Sarfalao,Burkina Faso,Latérite,15/01/2020,2.703
+15,École primaire à Beauce,Beauce,MG20,20/07/2020,2.781
+16,Rue Fortier Sud,Sherbrooke,MG20,16/06/2020,2.83
+17,Cabane à sucre Beauce,Beauce,MG112,21/07/2020,2.7
+18,Planche de référence,Beauce (St Prosper),Sable,24/07/2020,2.709
+19,Bassin Versant,Sherbrooke,Till,16/08/2020,
+20,Rue Aberdeen,Sherbrooke,MG20,04/06/2020,2.83
+21,Planche de référence,Beauce (St Prosper),MG20,24/07/2020,2.781
+22,École primaire à Beauce,Beauce,MG112,20/07/2020,2.784
+23,Rue Boulogne,Sherbrooke,MG20,21/06/2021,2.836
+24,Planche St-Nicéphore,Drumondville,MG20,03/09/2021,2.82
+25,Rue Darche,Sherbrooke,MG20,10/06/2021,2.846
+26,Rue-Wallace,Sherbrooke,MG20,07/07/2021,2.781
+27,Autoroute 10,Granby,MG20,30/09/2021,2.745
+28,Autoroute 10,Granby,MG112,04/10/2021,2.763
+29,Rue Darche,Sherbrooke,MG112,10/06/2021,2.788
+30,Rue Bérubé,Victoriaville,Sable,25/02/2021,2.707
+31,Rue Chalmers,Sherbrooke,CG14,24/05/2022,2.707
+32,Rue Watkins,Drumondville,MG112,17/10/2022,2.677
+33,Rue Attateken,Montréal,MG20,28/06/2022,2.76
+34,Planche de référence,La Tuque,MG112,24/10/2022,2.729
+35,Planche de référence,La Tuque,MR-5,24/10/2022,2.668
