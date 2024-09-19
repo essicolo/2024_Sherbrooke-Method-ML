@@ -1,0 +1,75 @@
+# Fichiers et dossiers spécifiques à Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Environnements virtuels
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Fichiers spécifiques à Poetry
+poetry.lock
+
+# Fichiers de configuration PyCharm
+.idea/
+
+# Fichiers de configuration VS Code
+.vscode/
+
+# Fichiers système macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Fichiers de sauvegarde
+*.bak
+
+# Fichiers de log
+*.log
+
+# pyenv
+.python-version
+
+# Couverture de code
+.cache
+
+# Scrapy
+.scrapy
+
+# PyBuilder
+target/
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
