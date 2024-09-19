@@ -1,7 +1,7 @@
 import marimo
 
-__generated_with = "0.6.22"
-app = marimo.App()
+__generated_with = "0.8.17"
+app = marimo.App(width="medium")
 
 
 @app.cell(hide_code=True)
@@ -24,7 +24,7 @@ def __(mo):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def __():
     # notebook
     import marimo as mo
@@ -87,6 +87,7 @@ def __(pl):
     field = pl.read_csv("data/r_field.csv", null_values="NA")
     data = proctor.join(soils, on="Soil_ID", how="left", coalesce=True)
     data = data.with_columns((pl.col("VolWC_%") / 100).alias("VolWC"))
+    data
     return data, field, proctor, soils
 
 
@@ -224,7 +225,9 @@ def __(
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md(rf"The best parameters are not the outcomes of the grid search, but the following.")
+    mo.md(
+        rf"The best parameters are not the outcomes of the grid search, but the following."
+    )
     return
 
 
@@ -532,7 +535,9 @@ def __():
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md(rf"Data from table `field`, containing results from field experiments, will be used. We'll need $d_{85}$ and $Cu$, which are joined to the `field` table.")
+    mo.md(
+        rf"Data from table `field`, containing results from field experiments, will be used. We'll need $d_{85}$ and $Cu$, which are joined to the `field` table."
+    )
     return
 
 
@@ -578,7 +583,9 @@ def __(np):
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md(rf"We create a new data frame, containing the columns we need, then removing all rows containing at least one null (unmeasured) value.")
+    mo.md(
+        rf"We create a new data frame, containing the columns we need, then removing all rows containing at least one null (unmeasured) value."
+    )
     return
 
 
@@ -674,7 +681,7 @@ def __(
                 pl.Series(WLR_R2).alias("WLR_R2"),
                 pl.Series(θ_R1).alias("θ_R1"),
                 pl.Series(θ_R2).alias("θ_R2"),
-                pl.Series([1000.0]).alias("ρw"),
+                pl.lit(1000.0).alias("ρw"),
             ]
         )
         # make sure volumetric water content does not exceed porosity
@@ -696,14 +703,15 @@ def __(
                 ρw=pl.col("ρw"),
                 Gs=pl.col("Gs"),
             ).alias("Sr_R2")
-        ).with_columns(sr_to_srlr(pl.col("Sr_R2")).alias("SrLR_R2"))
+        )
+        .with_columns(sr_to_srlr(pl.col("Sr_R2")).alias("SrLR_R2"))
     )
     return field_results, θ_R1, θ_R2
 
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md(r"Transforming data.")
+    mo.md(r"""Transforming data.""")
     return
 
 
@@ -747,7 +755,9 @@ def __(StandardScaler, field_results, pl):
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md(rf"Looking for the most appropriate `alpha` with grid search cross validation.")
+    mo.md(
+        rf"Looking for the most appropriate `alpha` with grid search cross validation."
+    )
     return
 
 
@@ -889,7 +899,7 @@ def __(pl, plot_data_ρd):
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md("Compared to nucleodensimeter...")
+    mo.md("""Compared to nucleodensimeter...""")
     return
 
 
@@ -931,7 +941,7 @@ def __(pl, plot_data_ND):
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md("Summary statistics for accuracy assessment.")
+    mo.md("""Summary statistics for accuracy assessment.""")
     return
 
 
@@ -1067,11 +1077,6 @@ def __(np, plt, srmod_ρd):
     plt.savefig("images/rho_distr.png")
     rho_distr
     return density_limit, prob_sup, rho_distr, srmod_ρd_flat
-
-
-@app.cell
-def __():
-    return
 
 
 if __name__ == "__main__":
