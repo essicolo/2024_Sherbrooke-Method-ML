@@ -73,3 +73,6 @@ ipython_config.py
 
 # Cython debug symbols
 cython_debug/
+
+# intermidiate data
+*.pkl
