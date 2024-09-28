@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.8.17"
+__generated_with = "0.8.20"
 app = marimo.App(width="medium")
 
 
@@ -24,7 +24,7 @@ def __(mo):
     return
 
 
-@app.cell(hide_code=True)
+@app.cell
 def __():
     # notebook
     import marimo as mo
@@ -32,15 +32,24 @@ def __():
     # math
     import polars as pl
     import numpy as np
+
+    np.random.seed(554390)  # random.org
     from scipy.optimize import minimize
+    import functools
 
     # plot
     import matplotlib.pyplot as plt
     import seaborn as sns
 
     # model
+    import optuna
     from sklearn.gaussian_process import GaussianProcessRegressor
-    from sklearn.gaussian_process.kernels import RBF, Matern
+    from sklearn.gaussian_process.kernels import (
+        RBF,
+        Matern,
+        WhiteKernel,
+        ConstantKernel,
+    )
     from sklearn.metrics import root_mean_squared_error
     from sklearn.model_selection import GridSearchCV
     from sklearn.preprocessing import StandardScaler
@@ -49,17 +58,21 @@ def __():
 
     np.random.seed(7235)
     return (
+        ConstantKernel,
         GaussianProcessRegressor,
         GridSearchCV,
         Matern,
         RBF,
         StandardScaler,
+        WhiteKernel,
         cross_val_predict,
         cross_val_score,
+        functools,
         mean_squared_error,
         minimize,
         mo,
         np,
+        optuna,
         pl,
         plt,
         r2_score,
@@ -198,36 +211,62 @@ def __(StandardScaler, data_02):
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md(rf"A grid serach helps finding optimal hyperparameters.")
+    mo.md(rf"A Optuna serach can help finding optimal hyperparameters...")
     return
 
 
 @app.cell
-def __(
-    GaussianProcessRegressor,
-    GridSearchCV,
-    Matern,
-    probegp_featuressc,
-    probegp_targets,
-):
-    probegp_model_cv = GaussianProcessRegressor(n_restarts_optimizer=0)
-
-    param_grid = {
-        "alpha": [0.005, 0.01, 0.05, 0.1],
-        "kernel": [Matern(length_scale=1, nu=0.5), Matern(length_scale=1, nu=1.5)],
-    }
-
-    grid_search = GridSearchCV(probegp_model_cv, param_grid, cv=5)
-    grid_search.fit(probegp_featuressc, probegp_targets)
-    grid_search.best_params_
-    return grid_search, param_grid, probegp_model_cv
-
-
-@app.cell(hide_code=True)
 def __(mo):
     mo.md(
-        rf"The best parameters are not the outcomes of the grid search, but the following."
+        r"""
+        ```
+        np.random.seed(602886)  # random.org
+
+
+        def mean_variance_index(scores, weight=0.7):
+            mean_score = np.mean(scores)
+            std_score = np.std(scores)
+            normalized_mean = (mean_score - np.min(scores)) / (
+                np.max(scores) - np.min(scores)
+            )
+            normalized_std = 1 - (std_score / np.max(scores))
+            combined_score = weight * normalized_mean + (1 - weight) * normalized_std
+            return combined_score
+
+
+        def probe_objective(trial, features, target):
+            alpha = trial.suggest_float("alpha", 0.01, 0.5, log=True)
+            nu = trial.suggest_float("nu", 0.1, 1.5)
+            kernel = Matern(length_scale=1.0, nu=nu, length_scale_bounds=(0.01, 10.0))
+            gp = GaussianProcessRegressor(
+                kernel=kernel, alpha=alpha, n_restarts_optimizer=5, copy_X_train=False
+            )
+            score = cross_val_score(
+                gp, features, target, cv=5, scoring="neg_root_mean_squared_error"
+            )
+            index = mean_variance_index(score, weight=0.7)
+            return index
+
+
+        probe_objective_with_data = functools.partial(
+            probe_objective, features=probegp_featuressc, target=probegp_targets
+        )
+        probe_study = optuna.create_study(
+            study_name="probe GP study", direction="maximize"
+        )
+        probe_study.optimize(
+            probe_objective_with_data, n_trials=50, show_progress_bar=True
+        )
+        probe_study.best_params
+        ```
+        """
     )
+    return
+
+
+@app.cell
+def __(mo):
+    mo.md(r"""The best parameters were found at iteration 46 with values of {'alpha': 0.017228190776530504, 'nu': 1.3481744049668893}.""")
     return
 
 
@@ -241,24 +280,29 @@ def __(
     probegp_targets,
 ):
     # model
+    np.random.seed(774666)  # random.org
     probegp_model = GaussianProcessRegressor(
-        kernel=Matern(length_scale=1, nu=1.5),
+        kernel=Matern(
+            length_scale=1.0, nu=1.348, length_scale_bounds=(0.001, 10.0)
+        ),
         n_restarts_optimizer=10,
-        alpha=0.05,
+        alpha=0.01723,
+        optimizer="fmin_l_bfgs_b",
         normalize_y=True,
+        copy_X_train=False,
     )
 
     # cross validation
     r2_scores = cross_val_score(
-        probegp_model, probegp_featuressc, probegp_targets, cv=10, scoring="r2"
+        probegp_model, probegp_featuressc, probegp_targets, cv=5, scoring="r2"
     )
-    print(f"Min -R2: {np.min(r2_scores)}")
+    print(f"Min R2: {np.min(r2_scores)}")
     print(f"Median R2: {np.median(r2_scores)}")
     print(f"Max R2: {np.max(r2_scores)}")
     return probegp_model, r2_scores
 
 
-@app.cell(hide_code=True)
+@app.cell
 def __(mo):
     mo.md(rf"Fit the model.")
     return
@@ -292,16 +336,16 @@ def __(
     probegp_model_targets_obs = WLR_to_VWC(probegp_targets.flatten())
     plot_data = pl.DataFrame(
         {
-            "Observed θ": probegp_model_targets_obs,
-            "Predicted θ": probegp_model_targets_pred,
+            "Observed θ in Proctor testing": probegp_model_targets_obs,
+            "Predicted θ with GP modelling": probegp_model_targets_pred,
             "Soil type": data["Metatype"],
         }
     )
     abline = [0, 0.35]
     g = sns.jointplot(
         data=plot_data,
-        x="Observed θ",
-        y="Predicted θ",
+        x="Observed θ in Proctor testing",
+        y="Predicted θ with GP modelling",
         hue="Soil type",
         palette="gray",
     )
@@ -341,7 +385,7 @@ def __(
     cu_list = []
     probe_list = []
     vwc_list = []
-    n_probe = 200
+    n_probe = 100
     probe = np.linspace(1800, 2800, n_probe)
 
     for k, soil_id_k in enumerate(soil_ids):
@@ -478,6 +522,7 @@ def __(data_02, model1_preds, np, pl, plt, probegp_featureslist, soil_ids):
         axs[row, col].axis("off")
 
     plt.tight_layout()
+    fig.savefig("images/probemodel-fitted.png")
     fig
     return (
         axs,
@@ -549,7 +594,7 @@ def __(field, soils):
         how="left",
         coalesce=False,
     )
-    return field_psd,
+    return (field_psd,)
 
 
 @app.cell(hide_code=True)
@@ -581,10 +626,14 @@ def __(np):
     return sr_to_srlr, srlr_to_sr
 
 
-@app.cell(hide_code=True)
+@app.cell
 def __(mo):
     mo.md(
-        rf"We create a new data frame, containing the columns we need, then removing all rows containing at least one null (unmeasured) value."
+        """
+        mo.md(
+            rf"We create a new data frame, containing the columns we need, then removing all rows containing at least one null (unmeasured) value."
+        )
+        """
     )
     return
 
@@ -602,12 +651,12 @@ def __(field_psd):
             "Metatype",
         ]
     ).drop_nulls()
-    return field_full,
+    return (field_full,)
 
 
-@app.cell(hide_code=True)
+@app.cell
 def __(mo):
-    mo.md(rf"Predict θ_R1 and θ_R2 with one of the models created before.")
+    mo.md("""mo.md(rf"Predict θ_R1 and θ_R2 with one of the models created before.")""")
     return
 
 
@@ -646,9 +695,9 @@ def __(field_full, probegp_featuresScaler, probegp_model):
     )
 
 
-@app.cell(hide_code=True)
+@app.cell
 def __(mo):
-    mo.md(rf"Gather the info for modelling.")
+    mo.md("""mo.md(rf"Gather the info for modelling.")""")
     return
 
 
@@ -716,6 +765,11 @@ def __(mo):
 
 
 @app.cell
+def __():
+    return
+
+
+@app.cell
 def __(StandardScaler, field_results, pl):
     # clean data
     srmod_features = ["WLR_R1", "d85", "cu", "Gs"]
@@ -736,7 +790,7 @@ def __(StandardScaler, field_results, pl):
     srmod_featuresScaler.fit_transform(srmod_featurestr)
     srmod_featuresmean = srmod_featurestr.mean(axis=0)
     srmod_featuresstd = srmod_featurestr.std(axis=0)
-    srmod_featuresrsc = (srmod_featurestr - srmod_featuresmean) / srmod_featuresstd
+    srmod_featuressc = (srmod_featurestr - srmod_featuresmean) / srmod_featuresstd
 
     # targets
     srmod_targettr = srmod_df[srmod_target].to_numpy()
@@ -745,7 +799,7 @@ def __(StandardScaler, field_results, pl):
         srmod_features,
         srmod_featuresScaler,
         srmod_featuresmean,
-        srmod_featuresrsc,
+        srmod_featuressc,
         srmod_featuresstd,
         srmod_featurestr,
         srmod_target,
@@ -756,35 +810,62 @@ def __(StandardScaler, field_results, pl):
 @app.cell(hide_code=True)
 def __(mo):
     mo.md(
-        rf"Looking for the most appropriate `alpha` with grid search cross validation."
+        """
+        mo.md(
+            rf"Looking for the most appropriate `alpha` with an Optuna search cross validation."
+        )
+        """
     )
     return
 
 
-@app.cell
-def __(
-    GaussianProcessRegressor,
-    GridSearchCV,
-    Matern,
-    srmod_featuresrsc,
-    srmod_targettr,
-):
-    srlr_model_cv = GaussianProcessRegressor(n_restarts_optimizer=0)
+@app.cell(hide_code=True)
+def __(mo):
+    mo.md(
+        r"""
+        ```
+        np.random.seed(534474)  # random.org
 
-    param_grid_sr = {
-        "alpha": [0.2, 0.21, 0.22, 0.23, 0.24],
-        "kernel": [Matern(length_scale=1, nu=0.5)],
-    }
+        def mean_variance_index(scores, weight=0.7):
+            mean_score = np.mean(scores)
+            std_score = np.std(scores)
+            normalized_mean = (mean_score - np.min(scores)) / (
+                np.max(scores) - np.min(scores)
+            )
+            normalized_std = 1 - (std_score / np.max(scores))
+            combined_score = weight * normalized_mean + (1 - weight) * normalized_std
+            return combined_score
 
-    grid_search_sr = GridSearchCV(srlr_model_cv, param_grid_sr, cv=10)
-    grid_search_sr.fit(srmod_featuresrsc, srmod_targettr)
-    grid_search_sr.best_params_
-    return grid_search_sr, param_grid_sr, srlr_model_cv
+
+        def sr_objective(trial, features, target):
+            alpha = trial.suggest_float("alpha", 0.01, 0.5, log=True)
+            nu = trial.suggest_float("nu", 0.1, 1.5)
+            kernel = Matern(length_scale=1.0, nu=nu, length_scale_bounds=(0.01, 10.0))
+            gp = GaussianProcessRegressor(
+                kernel=kernel, alpha=alpha, n_restarts_optimizer=5, copy_X_train=False
+            )
+            score = cross_val_score(
+                gp, features, target, cv=5, scoring="neg_root_mean_squared_error"
+            )
+            index = mean_variance_index(score, weight=0.7)
+            return index
+
+
+        sr_objective_with_data = functools.partial(
+            sr_objective, features=srmod_featuressc, target=srmod_targettr
+        )
+        sr_study = optuna.create_study(study_name="Sr GP study", direction="maximize")
+        sr_study.optimize(sr_objective_with_data, n_trials=50, show_progress_bar=True)
+        sr_study.best_params
+        ```
+        """
+    )
+    return
 
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md(rf"We then model Sr with a Gaussian process.")
+    mo.md("""We then model Sr with a Gaussian process with the best parameters, obtained at iteration 6: `{'alpha': 0.10608296702312398, 'nu': 0.9033760859287095}`.""")
     return
 
 
@@ -794,20 +875,23 @@ def __(
     Matern,
     cross_val_score,
     np,
-    srmod_featuresrsc,
+    srmod_featuressc,
     srmod_targettr,
 ):
     # model
+    np.random.seed(136050)  # random.org
     srlr_model = GaussianProcessRegressor(
-        kernel=Matern(length_scale=1, nu=0.5),
+        kernel=Matern(
+            length_scale=1.0, nu=0.9034, length_scale_bounds=(0.001, 10.0)
+        ),
         n_restarts_optimizer=10,
-        alpha=0.22,
+        alpha=0.1061,
         normalize_y=True,
     )
 
     # cross validation
     r2_scores_sr = cross_val_score(
-        srlr_model, srmod_featuresrsc, srmod_targettr, cv=10, scoring="r2"
+        srlr_model, srmod_featuressc, srmod_targettr, cv=5, scoring="r2"
     )
     print(f"Min R2 : {np.min(r2_scores_sr)}")
     print(f"Median R2 : {np.median(r2_scores_sr)}")
@@ -820,11 +904,11 @@ def __(
     root_mean_squared_error,
     srlr_model,
     srlr_to_sr,
-    srmod_featuresrsc,
+    srmod_featuressc,
     srmod_targettr,
 ):
-    srlr_model.fit(srmod_featuresrsc, srmod_targettr)
-    srlr_pred = srlr_model.predict(srmod_featuresrsc)
+    srlr_model.fit(srmod_featuressc, srmod_targettr)
+    srlr_pred = srlr_model.predict(srmod_featuressc)
     print(f"RMSE for Sr: {root_mean_squared_error(srmod_targettr, srlr_pred)}")
     sr_pred = srlr_to_sr(srlr_pred)
     return sr_pred, srlr_pred
@@ -834,22 +918,28 @@ def __(
 def __(pl, sns, sr_pred, srlr_to_sr, srmod_df):
     plot_data_sr = pl.DataFrame(
         {
-            "Observed Sr": srlr_to_sr(srmod_df["SrLR_R2"].to_numpy()),
-            "Predicted Sr": sr_pred,
+            "Observed Sr in feild testing": srlr_to_sr(
+                srmod_df["SrLR_R2"].to_numpy()
+            ),
+            "Predicted Sr with GP modelling": sr_pred,
             "Soil type": srmod_df["Metatype"],
         }
     )
-    abline_sr = [0.3, 1.0]
+    abline_sr = [0.4, 1.0]
     gsr = sns.jointplot(
         data=plot_data_sr,
-        x="Observed Sr",
-        y="Predicted Sr",
+        x="Observed Sr in feild testing",
+        y="Predicted Sr with GP modelling",
         hue="Soil type",
         palette="gray",
+        xlim=[0.3, 1.1],
+        ylim=[0.3, 1.1],
     )
     gsr.ax_joint.plot(abline_sr, abline_sr, "black")
     gsr.savefig("images/srmodel-obs-pred.png")
     gsr
+
+
     return abline_sr, gsr, plot_data_sr
 
 
@@ -894,7 +984,7 @@ def __(pl, plot_data_ρd):
             ** 2
         ).alias("squared_errors")
     ).with_columns(pl.Series("Device", ["Sherbrooke Method"] * len(plot_data_ρd)))
-    return predρd_stats,
+    return (predρd_stats,)
 
 
 @app.cell(hide_code=True)
@@ -936,7 +1026,7 @@ def __(pl, plot_data_ND):
             ** 2
         ).alias("squared_errors")
     ).with_columns(pl.Series("Device", ["Nucleodensimeter"] * len(plot_data_ND)))
-    return predND_stats,
+    return (predND_stats,)
 
 
 @app.cell(hide_code=True)
@@ -988,10 +1078,12 @@ def __(
     srlr_to_sr,
     srmod_featuresScaler,
 ):
+    np.random.seed(579025)  # random.org
+
     n_samples = 1000
 
-    probe_examplefeatures_R1 = np.array([[1.0, 0.05, 2.72, 2100]])
-    probe_examplefeatures_R2 = np.array([[1.0, 0.05, 2.72, 2300]])
+    probe_examplefeatures_R1 = np.array([[10.0, 0.08, 2.73, 2131]])
+    probe_examplefeatures_R2 = np.array([[10.0, 0.08, 2.73, 2342]])
 
     probe_WLR1 = probegp_model.sample_y(
         probegp_featuresScaler.transform(probe_examplefeatures_R1),
@@ -1032,7 +1124,7 @@ def __(phase_ρd, probe_examplefeatures_R1, probe_θ2, sr_samples):
     srmod_ρd = phase_ρd(
         θ=probe_θ2, Sr=sr_samples, ρw=1000, Gs=probe_examplefeatures_R1[0, 2]
     )
-    return srmod_ρd,
+    return (srmod_ρd,)
 
 
 @app.cell
@@ -1041,7 +1133,7 @@ def __(n_samples, np, pl, plt, probe_θ1, probe_θ2, sns):
     probe_θ_df = pl.DataFrame(
         {
             "Value": np.concatenate([probe_θ1, probe_θ2]),
-            "Probe": ["probe θ1"] * n_samples + ["probe θ2"] * n_samples,
+            "Probe": ["probe $θ_1$"] * n_samples + ["probe $θ_2$"] * n_samples,
         }
     )
 
@@ -1053,8 +1145,8 @@ def __(n_samples, np, pl, plt, probe_θ1, probe_θ2, sns):
         hue="Probe",
         bins=30,
         kde=False,
-        palette="grey",
-        edgecolor="#333",
+        palette=["#777", "#000"],
+        edgecolor="white",
         alpha=0.7,
     )
     plt.savefig("images/vwc_ditr.png")
@@ -1075,8 +1167,13 @@ def __(np, plt, srmod_ρd):
         f"Probability to obtain density superior to {density_limit} kg/m³: {round(prob_sup * 100)} %."
     )
     plt.savefig("images/rho_distr.png")
-    rho_distr
+    plt.show()
     return density_limit, prob_sup, rho_distr, srmod_ρd_flat
+
+
+@app.cell
+def __():
+    return
 
 
 if __name__ == "__main__":

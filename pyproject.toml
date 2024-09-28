@@ -1,27 +1,21 @@
-[tool.poetry]
+[project]
 name = "2024-sherbrooke-method-ml"
 version = "0.1.0"
 description = "Supplementary material for manuscript Machine learning-based regression models to improve compaction control prediction when applying the Sherbrooke Method"
-authors = ["Essi Parent <9ivko1ozf@relay.firefox.com>"]
-license = "CC BY-NC"
 readme = "README.md"
-
-[tool.poetry.dependencies]
-python = ">=3.12,<3.13"
-pandas = "^2.2.2"
-polars = "^1.7.1"
-numpy = ">=1.17.0,<2"
-matplotlib = "^3.9.2"
-scipy = "^1.14.1"
-statsmodels = "^0.14.3"
-pymc = "^5.16.2"
-pytensor = "^2.25.4"
-seaborn = "^0.13.2"
-scikit-learn = "^1.5.2"
-marimo = "^0.8.17"
-pyarrow = "^17.0.0"
-
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires-python = ">=3.12"
+dependencies = [
+    "marimo>=0.8.20",
+    "matplotlib>=3.9.2",
+    "numpy>=2.1.1",
+    "optuna>=4.0.0",
+    "pandas>=2.2.3",
+    "polars>=1.8.2",
+    "pyarrow>=17.0.0",
+    "pymc>=5.15.0",
+    "pytensor>=2.20.0",
+    "scikit-learn>=1.5.2",
+    "scipy>=1.14.1",
+    "seaborn>=0.13.2",
+    "statsmodels>=0.14.3",
+]
