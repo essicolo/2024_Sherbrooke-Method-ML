@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.8.20"
+__generated_with = "0.9.20"
 app = marimo.App(width="medium")
 
 
@@ -44,28 +44,22 @@ def __():
     # model
     import optuna
     from sklearn.gaussian_process import GaussianProcessRegressor
-    from sklearn.gaussian_process.kernels import (
-        RBF,
-        Matern,
-        WhiteKernel,
-        ConstantKernel,
-    )
-    from sklearn.metrics import root_mean_squared_error
-    from sklearn.model_selection import GridSearchCV
+    from sklearn.gaussian_process.kernels import Matern, WhiteKernel
     from sklearn.preprocessing import StandardScaler
-    from sklearn.model_selection import cross_val_score, cross_val_predict
-    from sklearn.metrics import r2_score, mean_squared_error
+    from sklearn.model_selection import cross_val_score, KFold
+    from sklearn.metrics import (
+        mean_squared_error,
+        root_mean_squared_error,
+        r2_score,
+    )
 
     np.random.seed(7235)
     return (
-        ConstantKernel,
         GaussianProcessRegressor,
-        GridSearchCV,
+        KFold,
         Matern,
-        RBF,
         StandardScaler,
         WhiteKernel,
-        cross_val_predict,
         cross_val_score,
         functools,
         mean_squared_error,
@@ -79,6 +73,20 @@ def __():
         root_mean_squared_error,
         sns,
     )
+
+
+@app.cell
+def __(np):
+    def mean_variance_index(scores, weight=0.7):
+        mean_score = np.mean(scores)
+        std_score = np.std(scores)
+        normalized_mean = (mean_score - np.min(scores)) / (
+            np.max(scores) - np.min(scores)
+        )
+        normalized_std = 1 - (std_score / np.max(scores))
+        combined_score = weight * normalized_mean + (1 - weight) * normalized_std
+        return combined_score
+    return (mean_variance_index,)
 
 
 @app.cell(hide_code=True)
@@ -222,27 +230,18 @@ def __(mo):
         ```
         np.random.seed(602886)  # random.org
 
-
-        def mean_variance_index(scores, weight=0.7):
-            mean_score = np.mean(scores)
-            std_score = np.std(scores)
-            normalized_mean = (mean_score - np.min(scores)) / (
-                np.max(scores) - np.min(scores)
-            )
-            normalized_std = 1 - (std_score / np.max(scores))
-            combined_score = weight * normalized_mean + (1 - weight) * normalized_std
-            return combined_score
-
-
         def probe_objective(trial, features, target):
             alpha = trial.suggest_float("alpha", 0.01, 0.5, log=True)
             nu = trial.suggest_float("nu", 0.1, 1.5)
-            kernel = Matern(length_scale=1.0, nu=nu, length_scale_bounds=(0.01, 10.0))
+            kernel = Matern(
+                length_scale=1.0, nu=nu, length_scale_bounds=(0.01, 10.0)
+            ) + WhiteKernel(noise_level=0.1)
             gp = GaussianProcessRegressor(
                 kernel=kernel, alpha=alpha, n_restarts_optimizer=5, copy_X_train=False
             )
+            cv = KFold(n_splits=5, shuffle=True, random_state=466171)  # random.org
             score = cross_val_score(
-                gp, features, target, cv=5, scoring="neg_root_mean_squared_error"
+                gp, features, target, cv=cv, scoring="neg_root_mean_squared_error"
             )
             index = mean_variance_index(score, weight=0.7)
             return index
@@ -264,47 +263,68 @@ def __(mo):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def __(mo):
-    mo.md(r"""The best parameters were found at iteration 46 with values of {'alpha': 0.017228190776530504, 'nu': 1.3481744049668893}.""")
+    mo.md(r"""The best parameters were found at iteration 24 with values of {'alpha': 0.03140764053242634, 'nu': 1.4969865518170358}.""")
     return
 
 
 @app.cell
 def __(
     GaussianProcessRegressor,
+    KFold,
     Matern,
+    WLR_to_VWC,
+    WhiteKernel,
     cross_val_score,
     np,
     probegp_featuressc,
     probegp_targets,
 ):
     # model
-    np.random.seed(774666)  # random.org
+    np.random.seed(774666) # random.org
     probegp_model = GaussianProcessRegressor(
-        kernel=Matern(
-            length_scale=1.0, nu=1.348, length_scale_bounds=(0.001, 10.0)
-        ),
+        kernel=Matern(length_scale=1.0, nu=1.497, length_scale_bounds=(0.01, 10.0))
+        + WhiteKernel(noise_level=0.1),
         n_restarts_optimizer=10,
-        alpha=0.01723,
+        alpha=0.03141,
         optimizer="fmin_l_bfgs_b",
         normalize_y=True,
         copy_X_train=False,
+        random_state=909193, # random.org
+    )
+    probegp_cv = KFold(n_splits=5, shuffle=True, random_state=107838) # random.org
+    probegp_rmse_scores = WLR_to_VWC(
+        -cross_val_score(
+            probegp_model,
+            probegp_featuressc,
+            probegp_targets,
+            cv=probegp_cv,
+            scoring="neg_root_mean_squared_error",
+        )
     )
 
-    # cross validation
-    r2_scores = cross_val_score(
-        probegp_model, probegp_featuressc, probegp_targets, cv=5, scoring="r2"
+    probegp_r2_scores = cross_val_score(
+        probegp_model,
+        probegp_featuressc,
+        probegp_targets,
+        cv=probegp_cv,
+        scoring="r2",
     )
-    print(f"Min R2: {np.min(r2_scores)}")
-    print(f"Median R2: {np.median(r2_scores)}")
-    print(f"Max R2: {np.max(r2_scores)}")
-    return probegp_model, r2_scores
+
+    print(f"Min RMSE: {np.min(probegp_rmse_scores)}")
+    print(f"Median RMSE: {np.median(probegp_rmse_scores)}")
+    print(f"Max RMSE: {np.max(probegp_rmse_scores)}")
+
+    print(f"Min R2: {np.min(probegp_r2_scores)}")
+    print(f"Median R2: {np.median(probegp_r2_scores)}")
+    print(f"Max R2: {np.max(probegp_r2_scores)}")
+    return probegp_cv, probegp_model, probegp_r2_scores, probegp_rmse_scores
 
 
-@app.cell
+@app.cell(hide_code=True)
 def __(mo):
-    mo.md(rf"Fit the model.")
+    mo.md("""Fit the model.""")
     return
 
 
@@ -626,15 +646,9 @@ def __(np):
     return sr_to_srlr, srlr_to_sr
 
 
-@app.cell
+@app.cell(hide_code=True)
 def __(mo):
-    mo.md(
-        """
-        mo.md(
-            rf"We create a new data frame, containing the columns we need, then removing all rows containing at least one null (unmeasured) value."
-        )
-        """
-    )
+    mo.md("""We create a new data frame, containing the columns we need, then removing all rows containing at least one null (unmeasured) value.""")
     return
 
 
@@ -826,26 +840,25 @@ def __(mo):
         ```
         np.random.seed(534474)  # random.org
 
-        def mean_variance_index(scores, weight=0.7):
-            mean_score = np.mean(scores)
-            std_score = np.std(scores)
-            normalized_mean = (mean_score - np.min(scores)) / (
-                np.max(scores) - np.min(scores)
-            )
-            normalized_std = 1 - (std_score / np.max(scores))
-            combined_score = weight * normalized_mean + (1 - weight) * normalized_std
-            return combined_score
-
 
         def sr_objective(trial, features, target):
             alpha = trial.suggest_float("alpha", 0.01, 0.5, log=True)
             nu = trial.suggest_float("nu", 0.1, 1.5)
-            kernel = Matern(length_scale=1.0, nu=nu, length_scale_bounds=(0.01, 10.0))
+            kernel = Matern(
+                length_scale=1.0, nu=nu, length_scale_bounds=(0.01, 10.0)
+            ) + WhiteKernel(noise_level=0.1)
             gp = GaussianProcessRegressor(
-                kernel=kernel, alpha=alpha, n_restarts_optimizer=5, copy_X_train=False
-            )
+                kernel=kernel,
+                alpha=alpha,
+                n_restarts_optimizer=5,
+                copy_X_train=False,
+                random_state=470943,
+            )  # random.org
+            srlr_cv = KFold(
+                n_splits=5, shuffle=True, random_state=269428
+            )  # random.org
             score = cross_val_score(
-                gp, features, target, cv=5, scoring="neg_root_mean_squared_error"
+                gp, features, target, cv=srlr_cv, scoring="neg_root_mean_squared_error"
             )
             index = mean_variance_index(score, weight=0.7)
             return index
@@ -865,38 +878,59 @@ def __(mo):
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md("""We then model Sr with a Gaussian process with the best parameters, obtained at iteration 6: `{'alpha': 0.10608296702312398, 'nu': 0.9033760859287095}`.""")
+    mo.md("""We then model Sr with a Gaussian process with the best parameters, obtained at iteration 31: `{'alpha': 0.19395414063620006, 'nu': 0.10087920710585421}`.""")
     return
 
 
 @app.cell
 def __(
     GaussianProcessRegressor,
+    KFold,
     Matern,
+    WhiteKernel,
     cross_val_score,
     np,
+    srlr_to_sr,
     srmod_featuressc,
     srmod_targettr,
 ):
-    # model
     np.random.seed(136050)  # random.org
+    srlr_kernel = Matern(
+        length_scale=1.0, nu=0.1009, length_scale_bounds=(0.01, 10.0)
+    ) + WhiteKernel(noise_level=0.1)
     srlr_model = GaussianProcessRegressor(
-        kernel=Matern(
-            length_scale=1.0, nu=0.9034, length_scale_bounds=(0.001, 10.0)
-        ),
+        kernel=srlr_kernel,
         n_restarts_optimizer=10,
-        alpha=0.1061,
+        alpha=0.1940,
         normalize_y=True,
+        random_state=589919,
+    )  # random.org
+    srlr_cv = KFold(n_splits=5, shuffle=True, random_state=977455)  # random.org
+    rmse_scores_sr = srlr_to_sr(
+        -cross_val_score(
+            srlr_model,
+            srmod_featuressc,
+            srmod_targettr,
+            cv=srlr_cv,
+            scoring="neg_root_mean_squared_error",
+        )
+    )
+    r2_score_srlr = cross_val_score(
+        srlr_model,
+        srmod_featuressc,
+        srmod_targettr,
+        cv=srlr_cv,
+        scoring="r2",
     )
 
-    # cross validation
-    r2_scores_sr = cross_val_score(
-        srlr_model, srmod_featuressc, srmod_targettr, cv=5, scoring="r2"
-    )
-    print(f"Min R2 : {np.min(r2_scores_sr)}")
-    print(f"Median R2 : {np.median(r2_scores_sr)}")
-    print(f"Max R2 : {np.max(r2_scores_sr)}")
-    return r2_scores_sr, srlr_model
+    print(f"Min RMSE : {np.min(rmse_scores_sr)}")
+    print(f"Median RMSE : {np.median(rmse_scores_sr)}")
+    print(f"Max RMSE : {np.max(rmse_scores_sr)}")
+
+    print(f"Min R2 : {np.min(r2_score_srlr)}")
+    print(f"Median R2 : {np.median(r2_score_srlr)}")
+    print(f"Max R2 : {np.max(r2_score_srlr)}")
+    return r2_score_srlr, rmse_scores_sr, srlr_cv, srlr_kernel, srlr_model
 
 
 @app.cell
@@ -938,8 +972,6 @@ def __(pl, sns, sr_pred, srlr_to_sr, srmod_df):
     gsr.ax_joint.plot(abline_sr, abline_sr, "black")
     gsr.savefig("images/srmodel-obs-pred.png")
     gsr
-
-
     return abline_sr, gsr, plot_data_sr
 
 

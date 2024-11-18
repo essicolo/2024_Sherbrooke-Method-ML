@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.6.19"
+__generated_with = "0.9.20"
 app = marimo.App()
 
 
@@ -19,7 +19,7 @@ def __():
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md(r"## Load librairies")
+    mo.md(r"""## Load librairies""")
     return
 
 
@@ -48,7 +48,7 @@ def __():
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md(r"## Load and inspect data")
+    mo.md(r"""## Load and inspect data""")
     return
 
 
@@ -77,7 +77,7 @@ def __(alt, proctor_a):
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md(r"## PSD")
+    mo.md(r"""## PSD""")
     return
 
 
@@ -201,7 +201,7 @@ def __(curve_fit, grainsize, np, pl, rosin):
 def __(pl, rosin_param):
     rosin_param_df_a = pl.DataFrame(rosin_param)
     print("rosin", rosin_param_df_a["rmse"].mean())
-    return rosin_param_df_a,
+    return (rosin_param_df_a,)
 
 
 @app.cell
@@ -328,23 +328,21 @@ def __(np, pl, rosin_param_df_a):
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md(r"Join Rosin's parameters and fitted d85 and cu.")
+    mo.md(r"""Join Rosin's parameters and fitted d85 and cu.""")
     return
 
 
-app._unparsable_cell(
-    r"""
-    proctor_b = proctor_a.join(rosin_param_df_b, how=\"left\", on=\"Soil_ID\"coalesce=True)
-    soils_b = soils_a.join(rosin_param_df_b, how=\"left\", on=\"Soil_ID\", coalesce=True)
-    soils_b.write_csv(\"data/soils_rosin.csv\")
-    """,
-    name="__"
-)
+@app.cell
+def __(proctor_a, rosin_param_df_b, soils_a):
+    proctor_b = proctor_a.join(rosin_param_df_b, how="left", on="Soil_ID", coalesce=True)
+    soils_b = soils_a.join(rosin_param_df_b, how="left", on="Soil_ID", coalesce=True)
+    soils_b.write_csv("data/soils_rosin.csv")
+    return proctor_b, soils_b
 
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md(r"Évaluer les plages de paramètres.")
+    mo.md(r"""Évaluer les plages de paramètres.""")
     return
 
 
@@ -356,12 +354,12 @@ def __(pl, proctor_b):
         .agg([pl.min("value").alias("min"), pl.max("value").alias("max")])
     )
     kvar_ranges
-    return kvar_ranges,
+    return (kvar_ranges,)
 
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md(r"Effect of parameters on the particle size distribution.")
+    mo.md(r"""Effect of parameters on the particle size distribution.""")
     return
 
 
@@ -461,7 +459,7 @@ def __(alt, rosin_param_df_b, soils_b):
         .resolve_scale(x="independent", y="independent")
         .configure_axisY(grid=True)
     )
-    return kvar_soils,
+    return (kvar_soils,)
 
 
 @app.cell(hide_code=True)
@@ -497,7 +495,7 @@ def __(pl, proctor_b, smf):
 def __():
     def quadmod(x, a, b, c):
         return a + b * x + c * x**2
-    return quadmod,
+    return (quadmod,)
 
 
 @app.cell
@@ -676,7 +674,7 @@ def __(cusc, d85sc, gssc, n_draws, n_tune, pm, pt, sites, x_b, xref, y_):
 
 @app.cell
 def __(mo):
-    mo.md("The model takes a lot of time to sample, so it is saved with pickle for other uses.")
+    mo.md("""The model takes a lot of time to sample, so it is saved with pickle for other uses.""")
     return
 
 
@@ -684,12 +682,12 @@ def __(mo):
 def __(aetrace, pickle):
     with open("aetrace.pkl", "wb") as buff:
         pickle.dump({"aetrace": aetrace}, buff)
-    return buff,
+    return (buff,)
 
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md(r"The posterior distributions are presented in this general overview of the traces of the explored parameters. A good model will show traces that are relatively constant on the right side.")
+    mo.md(r"""The posterior distributions are presented in this general overview of the traces of the explored parameters. A good model will show traces that are relatively constant on the right side.""")
     return
 
 
@@ -702,19 +700,19 @@ def __(aetrace, plt, pm):
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md(r"I record the summary of the model in a table where the compatibility intervals (commonly referred to as confidence intervals) are presented at 95%, a typical (but arbitrary) level used for statistical significance.")
+    mo.md(r"""I record the summary of the model in a table where the compatibility intervals (commonly referred to as confidence intervals) are presented at 95%, a typical (but arbitrary) level used for statistical significance.""")
     return
 
 
 @app.cell
 def __(aetrace, pm):
     aeresults = pm.summary(aetrace, hdi_prob=0.95, round_to="none")
-    return aeresults,
+    return (aeresults,)
 
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md(r"The random effects of the model encompass site effects and incorporate variability that is not explained by the experimental parameters.")
+    mo.md(r"""The random effects of the model encompass site effects and incorporate variability that is not explained by the experimental parameters.""")
     return
 
 
@@ -753,7 +751,7 @@ def __(aeresults, alt, sites_df):
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md(r"Random effects generally have zero mean. But the Bayesian version is more flexible. To ensure an adequate statistical model, the equation should add the average of the random effects to the result.")
+    mo.md(r"""Random effects generally have zero mean. But the Bayesian version is more flexible. To ensure an adequate statistical model, the equation should add the average of the random effects to the result.""")
     return
 
 
@@ -761,12 +759,12 @@ def __(mo):
 def __(sites_results):
     ranef_mean = sites_results["mean"].mean()
     ranef_mean
-    return ranef_mean,
+    return (ranef_mean,)
 
 
 @app.cell(hide_code=True)
 def __(mo):
-    mo.md(r"Fixed effects are the effects identifiable by experimentation. The parameters noted here psd[0], psd[1] and psd[2] are respectively the parameters g1, g2 and k3 of the soil grain size. Note that the importance of parameters in the model cannot be judged by the magnitude of a coefficient.")
+    mo.md(r"""Fixed effects are the effects identifiable by experimentation. The parameters noted here psd[0], psd[1] and psd[2] are respectively the parameters g1, g2 and k3 of the soil grain size. Note that the importance of parameters in the model cannot be judged by the magnitude of a coefficient.""")
     return
 
 
@@ -817,14 +815,14 @@ def __(aeresults):
     ]
     fixef = fixef.reset_index()
     fixef
-    return fixef,
+    return (fixef,)
 
 
 @app.cell
 def __(aetrace, pm):
     aetrace_densityplot = pm.plot_density(aetrace, var_names=["ymin_d85", "ymin_cu", "ymin_gs"])
     aetrace_densityplot
-    return aetrace_densityplot,
+    return (aetrace_densityplot,)
 
 
 @app.cell
