@@ -709,9 +709,9 @@ def __(field_full, probegp_featuresScaler, probegp_model):
     )
 
 
-@app.cell
+@app.cell(hide_code=True)
 def __(mo):
-    mo.md("""mo.md(rf"Gather the info for modelling.")""")
+    mo.md("""Gather the info for modelling.""")
     return
 
 
@@ -1181,6 +1181,7 @@ def __(n_samples, np, pl, plt, probe_θ1, probe_θ2, sns):
         edgecolor="white",
         alpha=0.7,
     )
+    plt.xlabel("Volumetric water content, $θ$")
     plt.savefig("images/vwc_ditr.png")
     vwc_ditr
     return probe_θ_df, vwc_ditr
