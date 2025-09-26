@@ -1,0 +1,4 @@
+Method,Cross-validation,RMSE,CI_lower,CI_upper
+Sherbrooke Method,Random 5-fold,47.1,66.2,115.0
+Sherbrooke Method,Leave-one-soil-out,339.2,NaN,NaN
+Nucleodensimeter,Same test points,122.3,100.9,145.9
