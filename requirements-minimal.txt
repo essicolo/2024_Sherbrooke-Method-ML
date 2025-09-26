@@ -1,8 +1,0 @@
-numpy>=1.24.0,<2.0.0
-polars>=1.14.0
-scikit-learn>=1.5.2
-matplotlib>=3.9.2
-seaborn>=0.13.2
-scipy>=1.14.1
-marimo>=0.9.20
-optuna>=4.1.0
