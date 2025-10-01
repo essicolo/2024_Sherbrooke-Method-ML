@@ -1,7 +1,7 @@
 Device,Soil type,RMSE
-Sherbrooke Method,MG112,74.31426487747775
 Nucleodensimeter,MG112,105.29256928473065
 Nucleodensimeter,MG20,144.72182484987806
-Sherbrooke Method,MG20,104.06962407527708
+Sherbrooke Method,MG112,72.96722448486727
+Sherbrooke Method,MG20,108.92131856828145
+Sherbrooke Method,All,92.2642724209164
 Nucleodensimeter,All,122.27671689189805
-Sherbrooke Method,All,88.22225938979578

@@ -1,4 +1,4 @@
-Method,Cross-validation,RMSE,CI_lower,CI_upper
-Sherbrooke Method,Random 5-fold,88.2,38.2,59.0
-Sherbrooke Method,Leave-one-soil-out,189.6,NaN,NaN
-Nucleodensimeter,Same test points,122.3,101.0,146.2
+Method,Validation,RMSE,CI_lower,CI_upper,Notes
+Sherbrooke Method,Bootstrap (300 samples),51.7,50.4,53.1,95% CI from bootstrap
+Sherbrooke Method,Leave-one-soil-out CV,251.9,NaN,NaN,Cross-validation only
+Nucleodensimeter,Same test points,122.3,130.4,134.2,95% CI from bootstrap
