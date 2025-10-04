@@ -1,4 +1,4 @@
 Method,Validation,RMSE,CI_lower,CI_upper,Notes
-Sherbrooke Method,Bootstrap (300 samples),51.7,50.4,53.1,95% CI from bootstrap
-Sherbrooke Method,Leave-one-soil-out CV,251.9,NaN,NaN,Cross-validation only
-Nucleodensimeter,Same test points,122.3,130.4,134.2,95% CI from bootstrap
+Sherbrooke Method,Bootstrap,48.9,40.0,61.4,95% CI
+Sherbrooke Method,Leave-one-soil-out,250.1,2.1,369.0,Min-Max range
+Nucleodensimeter,Bootstrap,122.3,100.8,145.7,95% CI

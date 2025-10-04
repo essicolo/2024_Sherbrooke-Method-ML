@@ -42,6 +42,7 @@ def _(config):
     # plot
     import matplotlib.pyplot as plt
     import seaborn as sns
+    from great_tables import GT
 
     # model
     import optuna
@@ -52,25 +53,23 @@ def _(config):
     from sklearn.metrics import (
         mean_squared_error,
         root_mean_squared_error,
-        r2_score,
+        r2_score, make_scorer
     )
     from sklearn.kernel_ridge import KernelRidge
-    from sklearn.pipeline import Pipeline
-    from sklearn.compose import ColumnTransformer
     from sklearn.base import BaseEstimator, TransformerMixin
-    from sklearn.pipeline import Pipeline
 
     np.random.seed(config["MASTER_SEED"])
     return (
         BaseEstimator,
+        GT,
         GaussianProcessRegressor,
         GroupKFold,
         Matern,
-        Pipeline,
         RobustScaler,
         TransformerMixin,
         WhiteKernel,
         cross_val_score,
+        make_scorer,
         mean_squared_error,
         mo,
         np,
@@ -129,10 +128,10 @@ def _():
         "GP_N_RESTARTS_OPTIMIZER": 5,
 
         # Optimization parameters
-        "OPTUNA_N_TRIALS": 3,
-        "CV_N_SPLITS": 5,
+        "OPTUNA_N_TRIALS": 30,
+        "CV_N_SPLITS": 5, # just for optuna, the model is validated on leave one-soil out, which is more reliable
         "N_RESTARTS_OPTIMIZER": 5,
-        "BOOTSTRAP_N_SAMPLES": 2,
+        "BOOTSTRAP_N_SAMPLES": 500,
 
         # Convergence and overfitting parameters
         "OVERFITTING_VAL_SIZE": 0.2,
@@ -173,11 +172,11 @@ def _(
     GaussianProcessRegressor,
     GroupKFold,
     Matern,
-    Pipeline,
     RobustScaler,
     WhiteKernel,
     config,
     cross_val_score,
+    make_scorer,
     mean_squared_error,
     np,
     optuna,
@@ -233,6 +232,14 @@ def _(
         if max_sr is None:
             max_sr = config["MAX_SATURATION"]
         return np.minimum(max_sr, np.exp(srlr) / (1 + np.exp(srlr)))
+
+
+    def rmse_vwc(y_true_wlr, y_pred_wlr):
+        y_true_vwc = log_ratio_to_volumetric_water_content(y_true_wlr)
+        y_pred_vwc = log_ratio_to_volumetric_water_content(y_pred_wlr)
+        return np.sqrt(mean_squared_error(y_true_vwc, y_pred_vwc))
+
+    rmse_vwc_scorer = make_scorer(rmse_vwc, greater_is_better=False)
 
     def phase_ρd(theta, sr, rho_w, gs):
         """
@@ -350,16 +357,14 @@ def _(
                 optimizer='fmin_l_bfgs_b',
             )
 
-            # Create pipeline with scaling to improve convergence
-            pipeline = Pipeline([
-                ('scaler', RobustScaler()),
-                ('gp', gp)
-            ])
+            # Step-by-step: create scaler and scale features
+            scaler_cv = RobustScaler()
+            features_scaled_cv = scaler_cv.fit_transform(features)
 
             # Use GroupKFold if soil_ids are provided to prevent data leakage
             cv = GroupKFold(n_splits=min(config["CV_N_SPLITS"], len(np.unique(soil_ids))))
             cv_scores = cross_val_score(
-                pipeline, features, targets, groups=soil_ids, cv=cv, scoring="neg_root_mean_squared_error"
+                gp, features_scaled_cv, targets, groups=soil_ids, cv=cv, scoring="neg_root_mean_squared_error"
             )
 
 
@@ -370,7 +375,12 @@ def _(
                 random_state=random_seed + trial.number
             )
 
-            # Create pipeline for validation
+            # Step-by-step: fit scaler on training data
+            scaler_temp = RobustScaler()
+            X_train_scaled_temp = scaler_temp.fit_transform(X_train)
+            X_val_scaled_temp = scaler_temp.transform(X_val)
+
+            # Create and fit GP model for validation
             gp_temp = GaussianProcessRegressor(
                 kernel=kernel, 
                 alpha=alpha, 
@@ -378,15 +388,11 @@ def _(
                 copy_X_train=False, 
                 normalize_y=config.get("GP_NORMALIZE_Y", True)
             )
-            pipeline_temp = Pipeline([
-                ('scaler', RobustScaler()),
-                ('gp', gp_temp)
-            ])
+            gp_temp.fit(X_train_scaled_temp, y_train)
 
-            pipeline_temp.fit(X_train, y_train)
-
-            train_pred = pipeline_temp.predict(X_train)
-            val_pred = pipeline_temp.predict(X_val)
+            # Make predictions on scaled data
+            train_pred = gp_temp.predict(X_train_scaled_temp)
+            val_pred = gp_temp.predict(X_val_scaled_temp)
 
             train_rmse = np.sqrt(mean_squared_error(y_train, train_pred))
             val_rmse = np.sqrt(mean_squared_error(y_val, val_pred))
@@ -493,6 +499,7 @@ def _(
         phase_Sr,
         phase_ρd,
         porosity,
+        rmse_vwc_scorer,
         saturation_ratio_to_log_ratio,
         split_data_by_soil_ids,
         volumetric_water_content_to_log_ratio,
@@ -525,17 +532,17 @@ def _(config, pl):
 def _(mo):
     mo.md(
         r"""
-    ## Model Pipeline and Diagnostics
+    ## Model Training and Diagnostics
 
-    Advanced modeling framework with sklearn pipelines, prediction intervals,
+    Advanced modeling framework with step-by-step scikit-learn operations, prediction intervals,
     and comprehensive model diagnostics for robust geotechnical analysis.
     """
     )
     return
 
 
-@app.cell
-def _(BaseEstimator, Pipeline, TransformerMixin, np, pl):
+@app.cell(hide_code=True)
+def _(BaseEstimator, TransformerMixin, np, pl):
     class SoilFeatureEngineer(BaseEstimator, TransformerMixin):
         """
         Custom transformer for soil-specific feature engineering.
@@ -586,30 +593,6 @@ def _(BaseEstimator, Pipeline, TransformerMixin, np, pl):
 
         def get_feature_names_out(self, input_features=None):
             return np.array(self.feature_names_)
-
-    def create_model_pipeline(model, scaler, feature_engineer=None):
-        """
-        Create a complete modeling pipeline with preprocessing and feature engineering.
-
-        Args:
-            model: Sklearn-compatible model
-            scaler: Feature scaler
-            feature_engineer: Optional feature engineering transformer
-
-        Returns:
-            Sklearn Pipeline object
-        """
-        steps = []
-
-        if feature_engineer is not None:
-            steps.append(('feature_engineer', feature_engineer))
-
-        steps.extend([
-            ('scaler', scaler),
-            ('model', model)
-        ])
-
-        return Pipeline(steps)
 
     def compute_prediction_intervals(model, X, confidence_level=0.95):
         """
@@ -1063,13 +1046,13 @@ def _(BaseEstimator, Pipeline, TransformerMixin, np, pl):
     )
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(rf"""Overview of data quantity.""")
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(field, proctor, soils):
     print(
         "Number of proctor samples: " + str(proctor["Proctor_ID"].unique().count())
@@ -1079,7 +1062,7 @@ def _(field, proctor, soils):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(
         r"""
@@ -1225,6 +1208,7 @@ def _(
     probegp_featureslist,
     probegp_test_df,
     probegp_train_df,
+    rmse_vwc_scorer,
 ):
     np.random.seed(config["PROBE_MODEL_SEED"] + 1000)
 
@@ -1250,15 +1234,13 @@ def _(
         y_train = probegp_train_df.select(["WLR"]).to_numpy().ravel()
         X_train_scaled = probegp_featuresScaler.transform(X_train)
 
-        probegp_rmse_scores = log_ratio_to_volumetric_water_content(
-            -cross_val_score(
-                probegp_model,
-                X_train_scaled,
-                y_train,
-                cv=probegp_cv,
-                groups=soil_groups,
-                scoring="neg_root_mean_squared_error",
-            )
+        probegp_rmse_scores = -cross_val_score(
+            probegp_model,
+            X_train_scaled,
+            y_train,
+            cv=probegp_cv,
+            groups=soil_groups,
+            scoring=rmse_vwc_scorer
         )
 
         probegp_r2_scores = cross_val_score(
@@ -1479,6 +1461,32 @@ def _(probegp_featuressc, probegp_model, probegp_targets):
 
 @app.cell
 def _(mo):
+    mo.md(
+        r"""
+    ```
+     	kernel  	Matern(length...ise_level=0.1)
+    	alpha  	0.011354706203833605
+    	optimizer  	'fmin_l_bfgs_b'
+    	n_restarts_optimizer  	5
+    	normalize_y  	True
+    	copy_X_train  	False
+    	n_targets  	None
+    	random_state  	910493
+    	kernel__k1  	Matern(length....326, nu=2.49)
+    	kernel__k2  	WhiteKernel(noise_level=0.1)
+    	kernel__k1__length_scale  	0.3255451000840303
+    	kernel__k1__length_scale_bounds  	(0.01, ...)
+    	kernel__k1__nu  	2.493908922993146
+    	kernel__k2__noise_level  	0.1
+    	kernel__k2__noise_level_bounds  	(1e-05, ...)
+    ```
+    """
+    )
+    return
+
+
+@app.cell
+def _(mo):
     mo.md(rf"""Plot model 1.""")
     return
 
@@ -1672,7 +1680,7 @@ def _(data_02, model1_preds, np, pl, plt, probegp_featureslist, soil_ids):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(
         r"""
@@ -2029,7 +2037,7 @@ def _(
     return (srlr_model,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(
         r"""
@@ -2049,7 +2057,6 @@ def _(
     plot_feature_importance,
     srlr_model,
     srmod_features,
-    srmod_featuresScaler,
     srmod_featuressc,
     srmod_targettr,
 ):
@@ -2058,7 +2065,6 @@ def _(
 
     sr_importance_data = analyze_feature_importance(
         srlr_model,
-    srmod_featuresScaler,
         X_sr_importance,
         y_sr_importance,
         srmod_features,
@@ -2157,7 +2163,7 @@ def _(log_ratio_to_saturation_ratio, pl, sns, sr_pred, srmod_train_df):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(rf"""Once Sr is modelled, predictions can be expressed in terms of $ρ_d$.""")
     return
@@ -2204,7 +2210,7 @@ def _(pl, plot_data_ρd):
     return (predρd_stats,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""Compared to nucleodensimeter...""")
     return
@@ -2248,7 +2254,7 @@ def _(pl, plot_data_ND):
     return (predND_stats,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""Summary statistics for accuracy assessment.""")
     return
@@ -2266,7 +2272,7 @@ def _(config, np, pl, predND_stats, predρd_stats):
     pred_stats_all = (
         pred_stats.group_by("Device")
         .agg(pl.mean("squared_errors").alias("mean_squared_error"))
-        .with_columns(pl.Series("Soil type", ["All"] * 2))
+        .with_columns(pl.Series("Soil type", ["MG20, MG112"] * 2))
         .with_columns(np.sqrt(pl.col("mean_squared_error")).alias("RMSE"))
         .drop("mean_squared_error")
     )
@@ -2274,10 +2280,10 @@ def _(config, np, pl, predND_stats, predρd_stats):
     pred_stats_summary.write_csv(config["OUTPUT_PRED_STATS"])
 
     print(pred_stats_summary)
-    return
+    return (pred_stats_summary,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(
         r"""
@@ -2289,12 +2295,13 @@ def _(mo):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(
     GaussianProcessRegressor,
     Matern,
     RobustScaler,
     WhiteKernel,
+    config,
     data_02,
     field_results,
     log_ratio_to_saturation_ratio,
@@ -2303,7 +2310,6 @@ def _(
     pl,
     probegp_featureslist,
     root_mean_squared_error,
-    test_other_features,
     tqdm,
 ):
     def bootstrap_rmse(df, field_data, config, n_bootstrap=None):
@@ -2451,285 +2457,124 @@ def _(
         cross-validation where each fold excludes all samples from one soil type,
         preventing data leakage between samples from the same soil.
 
-        This approach is more realistic for geotechnical applications where
-        the goal is to predict performance on entirely new soil types.
+        Args:
+            proctor_df: Proctor data with WLR column (not used - field_df already has everything)
+            field_df: Field data with saturation observations (already has WLR_R1, SrLR_R2, etc.)
 
-        Uses GroupKFold with n_splits = number of unique soils for efficiency.
+        Returns:
+            Tuple of (overall_rmse, per_soil_rmse_array)
         """
-        import warnings
+        import polars as pl
         from sklearn.model_selection import GroupKFold
         from sklearn.gaussian_process import GaussianProcessRegressor
-        from sklearn.gaussian_process.kernels import Matern, WhiteKernel
-        from sklearn.metrics import mean_squared_error
         from sklearn.preprocessing import RobustScaler
+        from sklearn.gaussian_process.kernels import Matern, WhiteKernel
+        from tqdm import tqdm
 
-        warnings.filterwarnings("ignore")
+        np.random.seed(config["LOOCV_SEED"])
 
-        # Prepare combined dataset for GroupKFold
-        field_with_proctor_data = field_df.join(
-            proctor_df.select(["Soil_ID"]).unique(),
-            on="Soil_ID",
-            how="inner"
-        )
+        # field_df already has WLR_R1, SrLR_R2, θ_R2, and all other needed columns
+        field_data_clean = field_df.drop_nulls(subset=["WLR_R1", "SrLR_R2", "θ_R2", "Gs", "Density_kg/m3_PT", "d85", "cu"])
 
-        if len(field_with_proctor_data) == 0:
-            return np.nan
-
-        unique_soil_ids = field_with_proctor_data["Soil_ID"].unique().to_list()
-        n_soils = len(unique_soil_ids)
-
-        if n_soils < 2:
-            return np.nan
-
-        # Use GroupKFold instead of manual loop
+        n_soils = field_data_clean["Soil_ID"].n_unique()
         group_kfold = GroupKFold(n_splits=n_soils)
 
         # Prepare features and targets for the saturation ratio model
-        X_field_full = field_with_proctor_data.select(["WLR_R1", "d85", "cu", "Gs"]).to_numpy()
-        y_field_full = field_with_proctor_data.select(["SrLR_R2"]).to_numpy().ravel()
-        soil_groups = field_with_proctor_data.select(["Soil_ID"]).to_numpy().ravel()
+        X_field_full = field_data_clean.select(["WLR_R1", "d85", "cu", "Gs"]).to_numpy()
+        y_field_full = field_data_clean.select(["SrLR_R2"]).to_numpy().ravel()
+        soil_groups = field_data_clean.select(["Soil_ID"]).to_numpy().ravel()
 
         all_squared_errors = []
+        per_soil_rmse_list = []  # Track RMSE for each soil/fold
 
         for _train_idx, _test_idx in tqdm(
             group_kfold.split(X_field_full, y_field_full, soil_groups), 
             desc="LOSOCV with GroupKFold", 
             total=n_soils
         ):
-            # Get training and test soil IDs
-            _test_soil_ids = np.unique(soil_groups[_test_idx])
-            _train_soil_ids = np.unique(soil_groups[_train_idx])
+            # Split data
+            _X_field_train = X_field_full[_train_idx]
+            _y_field_train = y_field_full[_train_idx]
+            _X_field_test = X_field_full[_test_idx]
 
-            # Filter proctor data for training soils
-            _train_proctor = proctor_df.filter(pl.col("Soil_ID").is_in(_train_soil_ids.tolist()))
-            if len(_train_proctor) < 10:
-                continue
-
-            # Train probe model
-            _probegp_features_train = (
-                _train_proctor.select(["d85", "cu", "Gs", "Probe"]).drop_nulls().to_numpy()
-            )
-            _probegp_targets_train = (
-                _train_proctor.select(["WLR"]).drop_nulls().to_numpy()
-            )
-
-            if len(_probegp_features_train) < 10:
-                continue
-
-            _probegp_scaler_cv = RobustScaler()
-            _probegp_features_train_sc = _probegp_scaler_cv.fit_transform(_probegp_features_train)
-
-            _probegp_model_cv = GaussianProcessRegressor(
-                kernel=Matern(length_scale=1.0, nu=1.5, length_scale_bounds=(0.1, 20.0)) + WhiteKernel(noise_level=0.1),
-                alpha=0.03141,
-                n_restarts_optimizer=2,
-                normalize_y=True,
-                copy_X_train=False,
-                random_state=42
-            )
-            _probegp_model_cv.fit(_probegp_features_train_sc, _probegp_targets_train)
-
-            # Get field data for test soils and predict WLR_R1
-            _test_field_data = field_df.filter(pl.col("Soil_ID").is_in(_test_soil_ids.tolist()))
-            _test_probe_features = _test_field_data.select(["d85", "cu", "Gs"]).to_numpy()
-            _test_probe_data = np.column_stack([
-                _test_probe_features,
-                _test_field_data.select(["Probe_before_flood"]).to_numpy().ravel()
-            ])
-
-            _test_probe_data_sc = _probegp_scaler_cv.transform(_test_probe_data)
-            _WLR_R1_test = _probegp_model_cv.predict(_test_probe_data_sc)
+            # Scale features
+            _scaler_field = RobustScaler()
+            _X_field_train_sc = _scaler_field.fit_transform(_X_field_train)
+            _X_field_test_sc = _scaler_field.transform(_X_field_test)
 
             # Train saturation ratio model
-            _train_field = field_df.filter(pl.col("Soil_ID").is_in(_train_soil_ids.tolist()))
-            _srlr_features_train = _train_field.select(["WLR_R1", "d85", "cu", "Gs"]).drop_nulls().to_numpy()
-            _srlr_targets_train = _train_field.select(["SrLR_R2"]).drop_nulls().to_numpy().ravel()
-
-            if len(_srlr_features_train) < 5:
-                continue
-
-            _srlr_scaler_cv = RobustScaler()
-            _srlr_features_train_sc = _srlr_scaler_cv.fit_transform(_srlr_features_train)
-
-            _srlr_model_cv = GaussianProcessRegressor(
-                kernel=Matern(
-                    length_scale=1.0, nu=0.1, length_scale_bounds=(0.1, 20.0)
-                ) + WhiteKernel(noise_level=0.1),
-                alpha=0.194,
-                n_restarts_optimizer=3,
-                normalize_y=True,
-                random_state=42,
-            )
-            _srlr_model_cv.fit(_srlr_features_train_sc, _srlr_targets_train)
-
-            # Build test features and predict
-            _srlr_features_test = np.column_stack([_WLR_R1_test, _test_probe_features])
-            _srlr_features_test_sc = _srlr_scaler_cv.transform(_srlr_features_test)
-            _pred_srlr_test = _srlr_model_cv.predict(_srlr_features_test_sc)
-            _pred_sr_test = log_ratio_to_saturation_ratio(_pred_srlr_test)
-
-            # Calculate errors
-            _θ_R2_test = (
-                _test_field_data.select(["θ_R2"]).drop_nulls().to_numpy().flatten()
-            )
-            _Gs_test = _test_field_data.select(["Gs"]).drop_nulls().to_numpy().flatten()
-            _ρd_observed_test = _test_field_data.select(["Density_kg/m3_PT"]).drop_nulls().to_numpy().flatten()
-
-            _ρd_sm_test = phase_ρd(theta=_θ_R2_test, sr=_pred_sr_test.flatten(), rho_w=1000, gs=_Gs_test)
-            _squared_errors = (_ρd_observed_test - _ρd_sm_test) ** 2
-            all_squared_errors.extend(_squared_errors)
-
-        return np.sqrt(np.mean(all_squared_errors)) if all_squared_errors else np.nan
-
-        unique_soil_ids = field_df["Soil_ID"].unique().to_list()
-        all_squared_errors = []
-
-        for i, test_soil_id in tqdm(enumerate(unique_soil_ids), desc="LOOCV with GP"):
-            train_proctor = proctor_df.filter(pl.col("Soil_ID") != test_soil_id)
-            train_field = field_df.filter(pl.col("Soil_ID") != test_soil_id)
-            test_field = field_df.filter(pl.col("Soil_ID") == test_soil_id)
-
-            if (
-                len(train_proctor) < 10
-                or len(train_field) < 5
-                or len(test_field) == 0
-            ):
-                continue
-
-            # Train probe model
-            probegp_features_train = (
-                train_proctor.select(probegp_featureslist).drop_nulls().to_numpy()
-            )
-            probegp_targets_train = (
-                train_proctor.select(["WLR"]).drop_nulls().to_numpy()
-            )
-
-            probegp_scaler_cv = RobustScaler()
-            probegp_features_train_sc = probegp_scaler_cv.fit_transform(
-                probegp_features_train
-            )
-
-            probegp_model_cv = GaussianProcessRegressor(
-                kernel=Matern(
-                    length_scale=1.0, nu=1.5, length_scale_bounds=(0.1, 20.0)
-                )
-                + WhiteKernel(noise_level=0.1),
-                alpha=0.03141,
-                n_restarts_optimizer=2,
+            _srmod = GaussianProcessRegressor(
+                kernel=Matern(nu=2.5, length_scale=1.0) + WhiteKernel(noise_level=0.1),
+                n_restarts_optimizer=config.get("N_RESTARTS_OPTIMIZER", 5),
+                alpha=0.01,
                 normalize_y=True,
                 copy_X_train=False,
-                random_state=42 + i,
+                random_state=config["LOOCV_SEED"],
             )
-            probegp_model_cv.fit(probegp_features_train_sc, probegp_targets_train)
+            _srmod.fit(_X_field_train_sc, _y_field_train)
 
-            # Predict WLR_R1
-            test_with_probe = field_results.filter(
-                pl.col("Soil_ID") == test_soil_id
-            ).rename({"Probe_before_flood": "Probe"})
-            probe_test_features = (
-                test_with_probe.select(probegp_featureslist)
-                .drop_nulls()
-                .to_numpy()
-            )
-            probe_test_features_sc = probegp_scaler_cv.transform(
-                probe_test_features
-            )
-            WLR_R1_test = probegp_model_cv.predict(probe_test_features_sc)
+            # Predict saturation ratio
+            _pred_srlr_test = _srmod.predict(_X_field_test_sc)
+            _pred_sr_test = log_ratio_to_saturation_ratio(_pred_srlr_test)
 
-            # Train Sr model
-            srlr_features_train = (
-                train_field.select(["WLR_R1", "d85", "cu", "Gs"])
-                .drop_nulls()
-                .to_numpy()
-            )
-            srlr_targets_train = (
-                train_field.select(["SrLR_R2"]).drop_nulls().to_numpy()
-            )
+            # Get test field data using the indices
+            _test_field_data = field_data_clean[_test_idx]
+            _θ_R2_test = _test_field_data.select(["θ_R2"]).to_numpy().flatten()
+            _Gs_test = _test_field_data.select(["Gs"]).to_numpy().flatten()
+            _ρd_observed_test = _test_field_data.select(["Density_kg/m3_PT"]).to_numpy().flatten()
 
-            srlr_scaler_cv = RobustScaler()
-            srlr_features_train_sc = srlr_scaler_cv.fit_transform(
-                srlr_features_train
-            )
+            # Compute predicted density
+            _ρd_sm_test = phase_ρd(theta=_θ_R2_test, sr=_pred_sr_test.flatten(), rho_w=1000, gs=_Gs_test)
+            _squared_errors = (_ρd_observed_test - _ρd_sm_test) ** 2
+        
+            # Track errors for this fold
+            fold_rmse = np.sqrt(np.mean(_squared_errors))
+            per_soil_rmse_list.append(fold_rmse)
+        
+            # Also add to overall error pool
+            all_squared_errors.extend(_squared_errors)
 
-            srlr_model_cv = GaussianProcessRegressor(
-                kernel=Matern(
-                    length_scale=1.0, nu=0.1, length_scale_bounds=(0.1, 20.0)
-                ) + WhiteKernel(noise_level=0.1),
-                alpha=0.194,
-                n_restarts_optimizer=3,
-                normalize_y=True,
-                random_state=42,
-            )
-            srlr_model_cv.fit(srlr_features_train_sc, srlr_targets_train)
+        if not all_squared_errors:
+            return np.nan, np.array([])
 
-            # Build test features and predict
-            srlr_features_test = np.column_stack([WLR_R1_test, test_other_features])
-            srlr_features_test_sc = srlr_scaler_cv.transform(srlr_features_test)
+        overall_rmse = np.sqrt(np.mean(all_squared_errors))
+        per_soil_rmse = np.array(per_soil_rmse_list)
 
-            pred_srlr_test = srlr_model_cv.predict(srlr_features_test_sc)
-            pred_sr_test = log_ratio_to_saturation_ratio(pred_srlr_test)
-
-            # Calculate errors
-            θ_R2_test = (
-                test_field.select(["θ_R2"]).drop_nulls().to_numpy().flatten()
-            )
-            Gs_test = test_field.select(["Gs"]).drop_nulls().to_numpy().flatten()
-            ρd_observed_test = (
-                test_field.select(["Density_kg/m3_PT"])
-                .drop_nulls()
-                .to_numpy()
-                .flatten()
-            )
-
-            ρd_sm_test = phase_ρd(
-                theta=θ_R2_test, sr=pred_sr_test.flatten(), rho_w=1000, gs=Gs_test
-            )
-            squared_errors = (ρd_observed_test - ρd_sm_test) ** 2
-            all_squared_errors.extend(squared_errors)
-
-        return (
-            np.sqrt(np.mean(all_squared_errors)) if all_squared_errors else np.nan
-        )
+        return overall_rmse, per_soil_rmse
     return bootstrap_rmse, leave_one_soil_out_cv_rmse
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(rf"""### Run bootstrap analysis""")
     return
 
 
 @app.cell
-def _(
-    bootstrap_rmse,
-    config,
-    data_02,
-    field,
-    field_results,
-    leave_one_soil_out_cv_rmse,
-    mo,
-    np,
-    srmod_df,
-):
-    with mo.persistent_cache(name="bootstrap_cache"):
+def _(bootstrap_rmse, config, field, mo, np, srmod_df):
+    with mo.persistent_cache(name="losocv_cache"):
         rmse_sm_bootstrap, rmse_nd_bootstrap = bootstrap_rmse(
             srmod_df, field, config, n_bootstrap=config["BOOTSTRAP_N_SAMPLES"]
         )
-    ci_lower_sm = np.percentile(rmse_sm_bootstrap, 2.5)
-    ci_upper_sm = np.percentile(rmse_sm_bootstrap, 97.5)
-    ci_lower_nd = np.percentile(rmse_nd_bootstrap, 2.5)
-    ci_upper_nd = np.percentile(rmse_nd_bootstrap, 97.5)
-
-    rmse_losocv = leave_one_soil_out_cv_rmse(data_02, field_results)
+        ci_lower_sm = np.percentile(rmse_sm_bootstrap, 2.5)
+        ci_upper_sm = np.percentile(rmse_sm_bootstrap, 97.5)
+        ci_lower_nd = np.percentile(rmse_nd_bootstrap, 2.5)
+        ci_upper_nd = np.percentile(rmse_nd_bootstrap, 97.5)
     return (
         ci_lower_nd,
         ci_lower_sm,
         ci_upper_nd,
         ci_upper_sm,
-        rmse_losocv,
         rmse_nd_bootstrap,
         rmse_sm_bootstrap,
     )
+
+
+@app.cell
+def _(data_02, field_results, leave_one_soil_out_cv_rmse, mo):
+    with mo.persistent_cache(name="bootstrap_cache"):
+        rmse_losocv, rmse_losocv_per_soil = leave_one_soil_out_cv_rmse(data_02, field_results)
+    return rmse_losocv, rmse_losocv_per_soil
 
 
 @app.cell
@@ -2778,6 +2623,12 @@ def _(
 
 
 @app.cell
+def _(rmse_losocv_per_soil):
+    rmse_losocv_per_soil
+    return
+
+
+@app.cell
 def _(
     ci_lower_nd,
     ci_lower_sm,
@@ -2787,9 +2638,13 @@ def _(
     pl,
     rmse_current_nd,
     rmse_losocv,
+    rmse_losocv_per_soil,
     rmse_sm_bootstrap,
 ):
     rmse_sm_bootstrap_mean = np.mean(rmse_sm_bootstrap)
+    losocv_ci_lower = rmse_losocv_per_soil.min()
+    losocv_ci_upper = rmse_losocv_per_soil.max()
+
 
     accuracy_summary = pl.DataFrame(
         {
@@ -2799,25 +2654,25 @@ def _(
                 "Nucleodensimeter",
             ],
             "Validation": [
-                "Bootstrap (300 samples)",
-                "Leave-one-soil-out CV", 
-                "Same test points",
+                f"Bootstrap", #  ({config["BOOTSTRAP_N_SAMPLES"]} samples)
+                "Leave-one-soil-out", 
+                f"Bootstrap",
             ],
             "RMSE": [rmse_sm_bootstrap_mean, rmse_losocv, rmse_current_nd],
             "CI_lower": [
                 ci_lower_sm,
-                np.nan,  # LOOCV doesn't have bootstrap CI
+                losocv_ci_lower,
                 ci_lower_nd,
             ],
             "CI_upper": [
                 ci_upper_sm, 
-                np.nan,  # LOOCV doesn't have bootstrap CI
+                losocv_ci_upper,
                 ci_upper_nd
             ],
             "Notes": [
-                "95% CI from bootstrap",
-                "Cross-validation only",
-                "95% CI from bootstrap"
+                "95% CI",
+                "Min-Max range",
+                "95% CI"
             ]
         }
     )
@@ -2842,13 +2697,96 @@ def _(accuracy_summary, config):
 
 
 @app.cell
+def _(pred_stats_summary):
+    print(pred_stats_summary)
+    return
+
+
+@app.cell
+def _(accuracy_summary, pl):
+    paper_table =  accuracy_summary.clone().with_columns([
+        pl.lit('New Column').alias('status')
+    ])
+    paper_table
+    return
+
+
+@app.cell
+def _(accuracy_summary, pl, pred_stats_summary):
+    accuracy_summary_formatted = accuracy_summary.with_columns([
+        pl.lit('MG20, MG112').alias('Soil')
+    ]).with_columns([
+        pl.col('Method').alias('Device'),
+        pl.when(
+            pl.col('CI_lower').is_not_nan() & 
+            pl.col('CI_upper').is_not_nan() &
+            pl.col('CI_lower').is_not_null() & 
+            pl.col('CI_upper').is_not_null()
+        )
+        .then(
+            pl.format('{} ({}-{})', 
+                      pl.col('RMSE').round(1), 
+                      pl.col('CI_lower').round(1), 
+                      pl.col('CI_upper').round(1))
+        )
+        .otherwise(pl.col('RMSE').round(1).cast(pl.Utf8))
+        .alias('RMSE')
+    ]).select(['Device', 'Validation', 'Soil', 'RMSE', 'Notes'])
+
+    pred_stats_formatted = pred_stats_summary.with_columns([
+        pl.col('Device'),
+        pl.col('Soil type').alias('Soil'),
+        pl.col('RMSE').round(1).cast(pl.Utf8),
+        pl.lit(' - ').alias('Validation'),
+        pl.lit('Fitted on all data').alias('Notes')
+    ]).select(['Device', 'Validation', 'Soil', 'RMSE', 'Notes'])
+
+    df_formatted = pl.concat([pred_stats_formatted, accuracy_summary_formatted])
+
+    return (df_formatted,)
+
+
+@app.cell
+def _():
+    return
+
+
+@app.cell
+def _(GT, df_formatted):
+    great_table = (
+        GT(df_formatted)
+        .cols_label(
+            Device="Device",
+            Validation="Validation",
+            Soil="Soil",
+            RMSE="RMSE",
+            Notes="Note"
+        )
+        .tab_options(
+            table_font_size="14px",
+            heading_align="left"
+        )
+    )
+
+    great_table.write_raw_html("images/summary_table.html")
+    great_table
+    return
+
+
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(rf"""## Example""")
     return
 
 
 @app.cell
-def _(config, np, probegp_model):
+def _(
+    config,
+    log_ratio_to_volumetric_water_content,
+    np,
+    probegp_featuresScaler,
+    probegp_model,
+):
     np.random.seed(config['EXAMPLE_SEED'])  # random.org
 
     n_samples = 1000
@@ -2856,47 +2794,22 @@ def _(config, np, probegp_model):
     probe_examplefeatures_R1 = np.array([[10.0, 0.08, 2.73, 2131]])
     probe_examplefeatures_R2 = np.array([[10.0, 0.08, 2.73, 2342]])
 
-    probe_pred1 = probegp_model.predict(probe_examplefeatures_R1)
-    probe_pred2 = probegp_model.predict(probe_examplefeatures_R2)
+    probe_examplefeatures_R1sc = probegp_featuresScaler.transform(probe_examplefeatures_R1)
+    probe_examplefeatures_R2sc = probegp_featuresScaler.transform(probe_examplefeatures_R2)
 
-    X1_engineered = probegp_model.named_steps['feature_engineer'].transform(probe_examplefeatures_R1)
-    X1_scaled = probegp_model.named_steps['scaler'].transform(X1_engineered)
-    probe_WLR1 = probegp_model.named_steps['model'].sample_y(X1_scaled, n_samples=n_samples)[0]
+    probe_WLR1 = probegp_model.sample_y(probe_examplefeatures_R1sc, n_samples=n_samples)
+    probe_WLR2 = probegp_model.sample_y(probe_examplefeatures_R2sc, n_samples=n_samples)
 
-    X2_engineered = probegp_model.named_steps['feature_engineer'].transform(probe_examplefeatures_R2)
-    X2_scaled = probegp_model.named_steps['scaler'].transform(X2_engineered)
-    probe_WLR2 = probegp_model.named_steps['model'].sample_y(X2_scaled, n_samples=n_samples)[0]
-
-    print(probe_WLR1[:10])
-    print(probe_WLR2[:10])
-
-    # This will apply all transformations and the model
-    print(probegp_model.predict(probe_examplefeatures_R1))
-    print(probegp_model.predict(probe_examplefeatures_R2))
-    return n_samples, probe_WLR1, probe_WLR2, probe_examplefeatures_R1
-
-
-@app.cell
-def _(log_ratio_to_volumetric_water_content, probe_WLR1, probe_WLR2):
     probe_θ1 = log_ratio_to_volumetric_water_content(probe_WLR1)
     probe_θ2 = log_ratio_to_volumetric_water_content(probe_WLR2)
-    return probe_θ1, probe_θ2
-
-
-@app.cell
-def _(phase_ρd, probe_examplefeatures_R1, probe_θ2, sr_samples):
-    srmod_ρd = phase_ρd(
-        theta=probe_θ2, sr=sr_samples, rho_w=1000, gs=probe_examplefeatures_R1[0, 2]
-    )
-    return (srmod_ρd,)
+    return n_samples, probe_WLR1, probe_examplefeatures_R1, probe_θ1, probe_θ2
 
 
 @app.cell
 def _(n_samples, np, pd, plt, probe_θ1, probe_θ2, sns):
-    probe_θ2
     probe_θ_df = pd.DataFrame(
         {
-            "Value": np.concatenate([probe_θ1, probe_θ2]),
+            "Value": np.concatenate([probe_θ1[0], probe_θ2[0]]),
             "Probe": ["probe $θ_1$"] * n_samples + ["probe $θ_2$"] * n_samples,
         }
     )
@@ -2916,25 +2829,40 @@ def _(n_samples, np, pd, plt, probe_θ1, probe_θ2, sns):
     plt.xlabel("Volumetric water content, $θ$")
     plt.savefig("images/vwc_ditr.png")
     vwc_ditr
-    return (probe_θ_df,)
-
-
-@app.cell
-def _(probe_θ_df, sns):
-    sns.histplot(
-        data=probe_θ_df[probe_θ_df["Probe"] == "probe $θ_1$"],
-        x="Value",
-        bins=30,
-        kde=False,
-        palette="#000",
-        edgecolor="white",
-        alpha=0.7,
-    )
     return
 
 
 @app.cell
-def _(np, plt, srmod_ρd):
+def _():
+    return
+
+
+@app.cell
+def _(
+    log_ratio_to_saturation_ratio,
+    n_samples,
+    np,
+    phase_ρd,
+    plt,
+    probe_WLR1,
+    probe_examplefeatures_R1,
+    probe_θ2,
+    srlr_model,
+    srmod_featuresScaler,
+):
+    srlr_model_examplefeatures = np.stack(
+        [probe_examplefeatures_R1[0]] * n_samples
+    )
+    srlr_model_examplefeatures[:, -1] = probe_WLR1
+    sr_samples = log_ratio_to_saturation_ratio(
+        srlr_model.sample_y(
+            srmod_featuresScaler.transform(srlr_model_examplefeatures),
+            n_samples=n_samples,
+        )
+    )
+    srmod_ρd = phase_ρd(
+        theta=probe_θ2, sr=sr_samples, rho_w=1000, gs=probe_examplefeatures_R1[0, 2]
+    )
     srmod_ρd_flat = srmod_ρd.flatten()
     density_limit = 1800
     prob_sup = np.sum(srmod_ρd_flat > density_limit) / len(srmod_ρd_flat)
